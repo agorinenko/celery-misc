@@ -1,1 +1,1 @@
-# celery-misc
+# Python async tools for Celery
