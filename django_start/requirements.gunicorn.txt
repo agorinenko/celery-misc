@@ -1,0 +1,4 @@
+-r requirements.txt
+
+supervisor==4.2.5
+gunicorn==23.0.0
