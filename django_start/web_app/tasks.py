@@ -70,9 +70,9 @@ def _long_running(task, *args, **kwargs):
 
 def _inf_running(task, *args, **kwargs):
     for _ in range(sys.maxsize):
-        # return
-        instance = monitoring_utils.find_task(task)
-        instance.update_duration()
-        if instance.is_revoked:
-            raise errors.SoftStop('Задача отозвана')
-        time.sleep(1)
+        return
+        # instance = monitoring_utils.find_task(task)
+        # instance.update_duration()
+        # if instance.is_revoked:
+        #     raise errors.SoftStop('Задача отозвана')
+        # time.sleep(1)

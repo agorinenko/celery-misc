@@ -1,14 +1,12 @@
 import logging
 from django.contrib import admin
-from django.contrib.admin.options import csrf_protect_m
-from django.core.exceptions import ValidationError
-from django.db import IntegrityError
 from django.db.models import JSONField, TextField
 from django.db.models.functions import Cast
 from django.http import HttpResponseRedirect
 from django_json_widget.widgets import JSONEditorWidget
 
 from celery_misc.celery_monitoring import models, monitoring_utils
+from celery_misc.django_utils import UserFriendlyModelAdmin
 
 
 @admin.action(description='Перезапустить задачу')
@@ -33,28 +31,6 @@ def kill_tasks(self, request, queryset):  # pylint: disable=unused-argument
 
     self.message_user(request, 'Задачи помечены для завершения.', level=logging.INFO)
     return HttpResponseRedirect(request.path)
-
-
-class UserFriendlyModelAdmin(admin.ModelAdmin):
-    """
-    Вывод ошибки пользователю вместо 500 ошибки сервера в административном интерфейсе
-    """
-    formfield_overrides = {JSONField: {'widget': JSONEditorWidget}}
-
-    @csrf_protect_m
-    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
-        try:
-            return super().changeform_view(request, object_id, form_url, extra_context)
-        except (ValidationError, IntegrityError) as ex:
-            if hasattr(ex, 'messages') and ex.messages:
-                for message in ex.messages:
-                    self.message_user(request, message, level=logging.ERROR)
-            elif hasattr(ex, 'message') and ex.message:
-                self.message_user(request, ex.message, level=logging.ERROR)
-            else:
-                self.message_user(request, str(ex), level=logging.ERROR)
-
-            return HttpResponseRedirect(request.path)
 
 
 @admin.register(models.CeleryTaskInstance)
