@@ -20,6 +20,21 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(minute='*/20'),  # every 20 min
         'enabled': False,
     },
+    'Периодическая отсылка сообщений': {
+        'task': 'celery_misc.transactional_outbox.tasks.send_events',
+        'schedule': crontab(minute='*/3'),  # every 3 min
+        'enabled': False,
+    },
+    'Пометка сообщений как устаревшие': {
+        'task': 'celery_misc.transactional_outbox.tasks.expiring_events',
+        'schedule': crontab(minute='*/20'),  # every 20 min
+        'enabled': False,
+    },
+    'Удаление устаревших сообщений': {
+        'task': 'celery_misc.transactional_outbox.tasks.delete_events',
+        'schedule': crontab(minute='*/20'),  # every 20 min
+        'enabled': False,
+    },
     'Ping': {
         'task': 'web_app.tasks.ping',
         'schedule': crontab(minute='*/20'),  # every 20 min

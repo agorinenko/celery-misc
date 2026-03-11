@@ -67,6 +67,7 @@ REQUIRED_APPS = [
 PROJECT_APPS = [
     'web_app',
     'celery_misc.celery_monitoring',
+    'celery_misc.transactional_outbox',
     'django_json_widget'
 ]
 
@@ -175,3 +176,11 @@ AUTH_PROFILE_MODULE = 'app'
 
 ALLOWED_HOSTS = parse_str_to_list('ALLOWED_HOSTS', default=["*"])
 DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+
+CELERY_MISC_TRANSACTIONAL_OUTBOX = {
+    'SEND_EVENTS_MAX_RETRIES': 6,
+    'SEND_EVENTS_RETRY_BACKOFF': 4,
+    'SEND_EVENTS_RETRY_BACKOFF_MAX': 800,
+    'SEND_EVENTS_RETRY_JITTER': True,
+    'SEND_EVENTS_STRATEGY': 'celery_misc.transactional_outbox.strategies.DummyCheckStatusStrategy'
+}
