@@ -52,7 +52,13 @@ INSTALLED_APPS = [
 ]
 ```
 
-4. Настройте модуль, добавив в Django settings параметр ``CELERY_MISC_TRANSACTIONAL_OUTBOX``.
+4. Выполнить миграции
+
+```
+python manage.py migrate transactional_outbox 
+```
+
+5. Настройте модуль, добавив в Django settings параметр ``CELERY_MISC_TRANSACTIONAL_OUTBOX``.
 
 ```python
 CELERY_MISC_TRANSACTIONAL_OUTBOX = {
@@ -67,7 +73,7 @@ CELERY_MISC_TRANSACTIONAL_OUTBOX = {
 ``SEND_EVENTS_STRATEGY`` отвечает за стратегию отправки и реализацию самой отправки. Наследуйтесь от BlockBatchStrategy
 или CheckStatusStrategy и реализуйте механизм отправки сообщений во внешнюю систему.
 
-5. Вы прекрасны! Реализовывайте бизнес логику вашего приложения, не вдаваясь в детали Transactional Outbox.
+6. Вы прекрасны! Реализовывайте бизнес логику вашего приложения, не вдаваясь в детали Transactional Outbox.
 
 ## Основные возможности
 

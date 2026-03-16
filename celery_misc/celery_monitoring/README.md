@@ -36,6 +36,11 @@ INSTALLED_APPS = [
     'django_json_widget'
 ]
 ```
+4. Выполнить миграции
+
+```
+python manage.py migrate celery_monitoring 
+```
 
 4. Вы прекрасны! Наслаждайтесь историей запусков ваших Celery задач в разделе "Мониторинг задач" в Django AdminUI.
 
