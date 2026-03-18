@@ -10,6 +10,18 @@ from celery_misc.transactional_outbox import models, enums
 logger = logging.getLogger(__name__)
 
 
+def get_pending_outbox_messages(event_ids: list[int] = None):
+    """ Получение QuerySet сообщений, ожидающих отправку """
+    pending_query_set = models.OutboxMessage.objects.filter(
+        ~Q(Q(status=enums.EventStatuses.SENT) | Q(status=enums.EventStatuses.EXPIRED))  # Не отправлено или устарело
+    )
+
+    if event_ids:
+        pending_query_set = pending_query_set.filter(id__in=event_ids)
+
+    return pending_query_set
+
+
 class BaseSendEventsStrategy(abc.ABC):
     def __init__(self, batch_size: int | None = None):
         self.batch_size = batch_size
@@ -24,7 +36,7 @@ class BaseSendEventsStrategy(abc.ABC):
         """ Дополнительная обработка запроса """
         return query_set
 
-    def send_events(self, event_ids: list[int] = None) -> list[int]:
+    def send_events(self, event_ids: list[int] = None, external_filter: Q | None = None) -> list[int]:
         """
         Отправка уведомлений во внешнюю систему, например в kafka или rabbit
         :param event_ids: список ID событий для обработки
@@ -45,13 +57,12 @@ class BaseSendEventsStrategy(abc.ABC):
             Каждый воркер берет небольшую порцию и быстро освобождает блокировки
             Другие воркеры могут сразу начать обрабатывать следующие порции
         """
-        pending_query_set = models.OutboxMessage.objects.filter(
-            ~Q(Q(status=enums.EventStatuses.SENT) | Q(status=enums.EventStatuses.EXPIRED))  # Не отправлено или устарело
-        ).order_by('created_at', 'id')
+        pending_query_set = get_pending_outbox_messages(event_ids=event_ids).order_by('created_at', 'id')
 
-        if event_ids:
-            pending_query_set = pending_query_set.filter(id__in=event_ids)
-        elif self.batch_size:
+        if external_filter:
+            pending_query_set = pending_query_set.filter(external_filter)
+
+        if self.batch_size and not event_ids:
             pending_query_set = pending_query_set[:self.batch_size]
 
         pending_query_set = self.process_base_query(pending_query_set)
@@ -88,9 +99,9 @@ class BlockBatchStrategy(BaseSendEventsStrategy, abc.ABC):
     так как создается одна длительная транзакция. Batch_size желательно уменьшить, чтобы сократить время общей блокировки.
     """
 
-    def send_events(self, event_ids: list[int] = None) -> list[int]:
+    def send_events(self, *args, **kwargs) -> list[int]:
         with transaction.atomic():
-            return super().send_events(event_ids=event_ids)
+            return super().send_events(*args, **kwargs)
 
     def process_base_query(self, query_set: QuerySet[models.OutboxMessage]):
         """ Блокировка запроса

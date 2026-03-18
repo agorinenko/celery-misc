@@ -6,7 +6,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from celery_misc import celery_utils, utils, model_utils
-from celery_misc.transactional_outbox import settings, enums, models
+from celery_misc.transactional_outbox import settings, enums, models, strategies
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +42,27 @@ def delete_events(self, *args, **kwargs):
 def _send_events(_, event_ids: list[int] = None, suppress_events_error: bool | None = False,
                  batch_size: int | None = 50):
     """ Отправка уведомлений во внешнюю систему, например в kafka или rabbit """
-    StrategyClass = utils.load_class(settings.SEND_EVENTS_STRATEGY)
-    strategy = StrategyClass(batch_size=batch_size)
-    error_messages = strategy.send_events(event_ids=event_ids)
-    if not suppress_events_error and error_messages:
-        error_ids = ','.join([str(e) for e in error_messages])
-        raise Exception('Возникли ошибки при отправке сообщений с ID "%s".', error_ids)
+    class_strategies = list(
+        strategies.get_pending_outbox_messages(event_ids=event_ids).values_list('strategy', flat=True).distinct(
+            'strategy'))
+    for class_strategy in class_strategies:
+        if class_strategy is None:
+            external_filter = Q(strategy__isnull=True)
+            class_strategy = settings.SEND_EVENTS_STRATEGY
+        else:
+            external_filter = Q(strategy=class_strategy)
+        try:
+            StrategyClass = utils.load_class(class_strategy)
+
+            strategy = StrategyClass(batch_size=batch_size)
+            error_messages = strategy.send_events(event_ids=event_ids, external_filter=external_filter)
+
+            if not suppress_events_error and error_messages:
+                error_ids = ','.join([str(e) for e in error_messages])
+                raise Exception('Возникли ошибки при отправке сообщений с ID "%s".', error_ids)
+        except Exception as ex:
+            logger.error('Возникла ошибка при обработке стратегии "%s".', class_strategy)
+            logger.exception(ex)
 
 
 def _expiring_events(_, expiration_delta_in_hours: int | None = 12):
