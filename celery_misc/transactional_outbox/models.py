@@ -14,7 +14,13 @@ class OutboxMessage(models.Model):
                                     help_text='Например, ID экземпляра модели данных "164" или "8470df44-5e62-44db-8881-bfa9606b507c".')
     event_type = models.CharField(null=False, blank=False, max_length=128, verbose_name='Тип события',
                                   help_text='Например, "order.created".')
+    strategy = models.CharField(
+        null=True, blank=True, max_length=128,
+        verbose_name='FQCN класса, реализующего стратегию отправки',
+        help_text='Например, "celery_misc.transactional_outbox.strategies.DummyCheckStatusStrategy".'
+    )
     payload = models.JSONField(null=False, blank=False, verbose_name='Данные события')
+    meta_data = models.JSONField(null=True, blank=True, verbose_name='Метаданные события')
     status = models.CharField(max_length=50, null=False, blank=False,
                               choices=enums.EventStatuses.choices,
                               default=enums.EventStatuses.PENDING,

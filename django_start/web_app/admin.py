@@ -1,7 +1,11 @@
 import logging
 
 from django.contrib import admin
-from django.contrib.auth.admin import csrf_protect_m
+
+try:
+    from django.contrib.auth.admin import csrf_protect_m
+except ImportError:
+    from django.contrib.admin.options import csrf_protect_m
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.http import HttpResponseRedirect

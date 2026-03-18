@@ -98,6 +98,48 @@ with outbox_utils.OutboxEvent('order.created') as outbox_guard:
 3. Предоставляет API для реализации своей собственной стратегии отправки.
 4. Возможность повторной отправки.
 5. Предоставляет утилитарные задачи, поддерживающие актуальность событий и своевременную их удаление.
+6. Предоставляет API регистрации пакета событий
+
+```python
+import uuid
+from celery_misc.transactional_outbox import outbox_utils, models, enums, tasks
+from unittest.mock import Mock
+
+total_count = 100
+payload = [{'i': i} for i in range(total_count)]
+idempotency_key = [str(uuid.uuid4()) for _ in range(total_count)]
+with outbox_utils.OutboxEvent('order.created') as outbox_guard:
+    order = Mock()
+    order.id = 123
+
+    outbox_guard.send(order, payload, idempotency_key=idempotency_key)
+```
+
+7. Возможность указания стратегии обработки при создании событий или пакета событий. У каждого события может быть либо
+   своя стратегии отправки, либо стратегия по умолчанию, заданная в настройке SEND_EVENTS_STRATEGY.
+
+```python
+import uuid
+from celery_misc.transactional_outbox import outbox_utils, models, enums, tasks
+from unittest.mock import Mock
+
+strategy = 'celery_misc.transactional_outbox.strategies.DummyBlockBatchStrategy'
+aggregate_id = 123
+event_type = 'order.created'
+payload = {'total': 100}
+idempotency_key = str(uuid.uuid4())
+meta_data = {
+    'test': 12345
+}
+with outbox_utils.OutboxEvent(event_type, strategy=strategy) as outbox_guard:
+    order = Mock()
+    order.id = aggregate_id
+
+    outbox_guard.send(order, payload, idempotency_key=idempotency_key, meta_data=meta_data)
+```
+
+при отправке события будет использоваться стратегия 
+"celery_misc.transactional_outbox.strategies.DummyBlockBatchStrategy" даже если по умолчанию указана другая.
 
 ## Стратегии отправки
 
