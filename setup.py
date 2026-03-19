@@ -18,7 +18,7 @@ def long_description():
 
 setuptools.setup(
     name='celery-misc',
-    version='1.0.3',
+    version='1.0.4',
     author='Anton Gorinenko',
     author_email='anton.gorinenko@gmail.com',
     description='Python async tools for Celery',
