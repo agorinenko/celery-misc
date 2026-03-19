@@ -292,3 +292,27 @@ def test_expiring_events__multy_strategy(mocker):
     tasks.send_events.apply_async(kwargs={'event_ids': [db_message_1.id, db_message_2.id]})
     publish_message_mocker_1.assert_called_once_with(db_message_1)
     publish_message_mocker_2.assert_called_once_with(db_message_2)
+
+
+def test_send_events__bulk_with_single_meta_data(mocker):
+    """ Создание и отправка пакета событий с указанием общей meta data """
+    mocker.patch('celery_misc.transactional_outbox.settings.SEND_EVENTS_STRATEGY',
+                 'celery_misc.transactional_outbox.strategies.DummyCheckStatusStrategy')
+    aggregate_id = 123
+    event_type = 'order.created'
+    total_count = 100
+    payload = [{'i': i} for i in range(total_count)]
+    idempotency_key = [str(uuid.uuid4()) for _ in range(total_count)]
+    meta_data = {'meta': 'meta_1'}
+    with outbox_utils.OutboxEvent(event_type) as outbox_guard:
+        # Здесь instance будет правильно типизирован как Order
+        order = Mock()
+        order.id = aggregate_id
+
+        outbox_guard.send(order, payload, idempotency_key=idempotency_key, meta_data=meta_data)
+
+    assert outbox_guard.event_ids
+    assert len(outbox_guard.event_ids) == total_count
+    for i, message_id in enumerate(outbox_guard.event_ids):
+        _validate_db_outbox_message(message_id, idempotency_key[i], payload[i], aggregate_id=aggregate_id,
+                                    event_type=event_type, meta_data=meta_data)
