@@ -6,8 +6,7 @@ from celery_misc.transactional_outbox import enums
 class OutboxMessage(models.Model):
     """ OUTBOX """
 
-    idempotency_key = models.CharField(null=False, blank=False, max_length=64, unique=True, db_index=True,
-                                       verbose_name='Idempotency key')
+    idempotency_key = models.CharField(null=False, blank=False, max_length=128, verbose_name='Idempotency key')
     aggregate_type = models.CharField(null=False, blank=False, max_length=128, verbose_name='Тип агрегата',
                                       help_text='Например, название модели данных "Order".')
     aggregate_id = models.CharField(null=False, blank=False, max_length=64, verbose_name='ID агрегата',

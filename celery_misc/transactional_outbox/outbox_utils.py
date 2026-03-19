@@ -102,14 +102,13 @@ class OutboxEvent:
             i += 1
 
     def _create_outbox_message(self):
-        with transaction.atomic():
-            if len(self.payload) == 1:
-                message = models.OutboxMessage.objects.create(**self.payload[0])
-                self.event_ids = [message.id]
-            else:
-                objs = [models.OutboxMessage(**payload) for payload in self.payload]
-                db_objs = models.OutboxMessage.objects.bulk_create(objs)
-                self.event_ids = [msg.id for msg in db_objs]
+        if len(self.payload) == 1:
+            message = models.OutboxMessage.objects.create(**self.payload[0])
+            self.event_ids = [message.id]
+        else:
+            objs = [models.OutboxMessage(**payload) for payload in self.payload]
+            db_objs = models.OutboxMessage.objects.bulk_create(objs)
+            self.event_ids = [msg.id for msg in db_objs]
 
         if self.event_ids:
             tasks.send_events_only_ones.apply_async(kwargs={'event_ids': self.event_ids})
