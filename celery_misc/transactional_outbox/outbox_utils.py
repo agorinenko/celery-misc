@@ -1,12 +1,9 @@
-from typing import TypeVar
+from typing import Any
 
 import uuid6
 from django.db import transaction
-from django.db.models import Model
 
 from celery_misc.transactional_outbox import models, tasks, enums
-
-T = TypeVar('T', bound=Model)
 
 
 def resend_events(event_ids: list[int]):
@@ -54,10 +51,13 @@ class OutboxEvent:
         finally:
             self._transaction = None
 
-    def send(self, instance: T,
+    def send(self, instance: Any,
              payload: dict | list[dict],
              idempotency_key: str | list[str] | None = None,
              meta_data: dict | list[dict] | None = None):
+        if not hasattr(instance, 'id'):
+            raise ValueError('Объект instance должен иметь атрибут id.')
+
         if self._transaction is None:
             raise RuntimeError(
                 'Метод send должен вызываться внутри контекстного менеджера OutboxEvent.'
@@ -71,7 +71,7 @@ class OutboxEvent:
             if not isinstance(payload, list):
                 self.idempotency_key = [str(uuid6.uuid7())]
             else:
-                self.idempotency_key = [str(uuid6.uuid7()) for i in range(len(payload))]
+                self.idempotency_key = [str(uuid6.uuid7()) for _ in range(len(payload))]
         elif not isinstance(idempotency_key, list):
             self.idempotency_key = [idempotency_key]
         else:
@@ -79,12 +79,12 @@ class OutboxEvent:
 
         meta_data_len = 0
         if meta_data:
-            if not isinstance(meta_data, list):
-                self.meta_data = [meta_data]
+            if isinstance(meta_data, list):
+                self.meta_data = meta_data
+                meta_data_len = len(self.meta_data)
             else:
                 self.meta_data = meta_data
-
-            meta_data_len = len(self.meta_data)
+                meta_data_len = 1
 
         if not isinstance(payload, list):
             self.payload = [self._serialize_event(payload)]
@@ -97,8 +97,12 @@ class OutboxEvent:
         i = 0
         for event_payload, idempotency_key in zip(self.payload, self.idempotency_key, strict=True):
             event_payload['idempotency_key'] = idempotency_key
-            if i < meta_data_len:
-                event_payload['meta_data'] = self.meta_data[i]
+            if self.meta_data:
+                if isinstance(self.meta_data, list):
+                    event_payload['meta_data'] = self.meta_data[i] if i < meta_data_len else None
+                elif meta_data_len == 1:
+                    event_payload['meta_data'] = self.meta_data
+
             i += 1
 
     def _create_outbox_message(self):
