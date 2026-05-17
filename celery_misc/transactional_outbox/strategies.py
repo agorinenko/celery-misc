@@ -39,6 +39,7 @@ class BaseSendEventsStrategy(abc.ABC):
     def send_events(self, event_ids: list[int] = None, external_filter: Q | None = None) -> list[int]:
         """
         Отправка уведомлений во внешнюю систему, например в kafka или rabbit
+        :param external_filter: дополнительный фильтр
         :param event_ids: список ID событий для обработки
         :return: список ID сообщений с неудавшейся отправкой
         Пояснения.

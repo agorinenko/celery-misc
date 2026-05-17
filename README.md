@@ -8,6 +8,13 @@
 2. celery_misc.transactional_outbox - модуль transactional outbox
 3. django_start - тестовый Django проект
 
+## Установка
+
+```bash
+pip install celery-misc           # только celery, без django
+pip install http-misc[django]     # для проектов celery + django
+```
+
 ## Celery Monitoring: Модуль мониторинга задач Celery с интеграцией в Django Admin
 
 Компонент обеспечивает наблюдение за запущенными задачами Celery, ведет историю их выполнения и предоставляет функционал
