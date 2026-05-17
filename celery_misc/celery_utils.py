@@ -4,8 +4,14 @@ from functools import wraps, partial
 from typing import Callable
 
 from celery import Task
-from django import db
-from django.conf import settings
+
+try:
+    from django import db
+    from django.conf import settings
+
+    WITH_DJANGO = True
+except ImportError:
+    WITH_DJANGO = False
 
 from celery_misc import errors
 
@@ -17,7 +23,10 @@ def cleanup_db_connections(func):
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if settings.CELERY_EAGER:
+        if not WITH_DJANGO:
+            return func(*args, **kwargs)
+
+        if getattr(settings, 'CELERY_EAGER', False):
             return func(*args, **kwargs)
 
         check_connections()
@@ -41,6 +50,9 @@ def check_connections():
     """
     Проверка соединений с Django
     """
+    if not WITH_DJANGO:
+        return
+
     for conn in db.connections.all():
         try:
             cur = conn.cursor()
@@ -50,11 +62,10 @@ def check_connections():
 
 
 @cleanup_db_connections
-def common_celery_task(*args,
-                       retry_if_error: bool | None = True,
-                       suppress_error: bool | None = False,
-                       before_send: Callable | None = None,
-                       **kwargs):
+def common_celery_task(
+        *args, retry_if_error: bool | None = True,
+        suppress_error: bool | None = False,
+        before_send: Callable | None = None, **kwargs):
     task = None
     if len(args) < 1:
         raise ValueError('Неверное использование common_celery_task. Не указана функция для выполнения.')
@@ -89,7 +100,7 @@ def common_celery_task(*args,
     except Exception as ex:  # pylint: disable=broad-except
         logger.error(f'Возникла ошибка при выполнении задачи %s.', task_name)
         logger.exception(ex)
-        if retry_if_error:
+        if retry_if_error and task and hasattr(task, 'retry'):
             raise task.retry(exc=ex)
 
         if not suppress_error:

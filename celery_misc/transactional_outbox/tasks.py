@@ -59,7 +59,7 @@ def _send_events(_, event_ids: list[int] = None, suppress_events_error: bool | N
 
             if not suppress_events_error and error_messages:
                 error_ids = ','.join([str(e) for e in error_messages])
-                raise Exception('Возникли ошибки при отправке сообщений с ID "%s".', error_ids)
+                raise Exception(f'Возникли ошибки при отправке сообщений с ID "{error_ids}".')
         except Exception as ex:
             logger.error('Возникла ошибка при обработке стратегии "%s".', class_strategy)
             logger.exception(ex)
