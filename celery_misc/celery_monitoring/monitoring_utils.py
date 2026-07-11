@@ -97,9 +97,10 @@ def find_task(task_id: str | uuid.UUID | Task) -> models.CeleryTaskInstance | No
     return task_obj
 
 
-def delete_tasks_log(task, expiration_delta_in_hours: int | None = 24,
+def delete_tasks_log(task, expiration_delta_in_hours: int | None = None,
                      force_delete: bool | None = False) -> int:
     """ Зачистка лога выполненных задач за прошедший период """
+    expiration_delta_in_hours = expiration_delta_in_hours or 24
     if expiration_delta_in_hours > 0:
         expiration_date = timezone.now() - timedelta(hours=expiration_delta_in_hours)
         delete_filter = Q(started_at__lt=expiration_date)
@@ -133,29 +134,54 @@ class TaskRepository(metaclass=utils.SingletonMeta):
     """ Репозиторий зарегистрированных задач """
 
     def __init__(self):
-        self.task_repository = set()
-        self.white_list = set()
-        self.black_list = set()
+        self._task_repository = {}
+        self._white_list = set()
+        self._black_list = set()
+        self._is_initialized = False
 
-    def is_monitoring(self, name: str, *args, **kwargs) -> bool:
+    def _ensure_initialized(self):
+        """Ленивая инициализация репозитория"""
+        if not self._is_initialized:
+            self.refresh_state()
+            self._is_initialized = True
+
+    def is_profiling_memory(self, name: str) -> bool:
+        """ Доступно профилирование ОЗУ """
+        self._ensure_initialized()
+        task = self._task_repository.get(name)
+        return task.get('is_profiling_memory', False)
+
+    def is_profiling_cpu(self, name: str) -> bool:
+        """ Доступно профилирование CPU """
+        self._ensure_initialized()
+
+        task = self._task_repository.get(name)
+        return task.get('is_profiling_cpu', False)
+
+    def is_monitoring(self, name: str) -> bool:
         """ Задание на мониторинге """
-
-        if name not in self.task_repository:
+        self._ensure_initialized()
+        if name not in self._task_repository:
             return True
 
-        if name in self.black_list:
+        if name in self._black_list:
             return False
 
-        if self.white_list and name not in self.white_list:
+        if self._white_list and name not in self._white_list:
             return False
 
         return True
 
     def refresh_state(self):
         """ Обновление состояния глобального репозитория задач """
-        self.task_repository = set(models.CeleryTaskRepository.objects.all().values_list('name', flat=True))
-        self.white_list = set(models.TaskWhiteList.objects.all().values_list('task__name', flat=True))
-        self.black_list = set(models.TaskBlackList.objects.all().values_list('task__name', flat=True))
+        self._task_repository = {
+            i.name: {
+                'name': i.name,
+                'is_profiling_cpu': i.is_profiling_cpu,
+                'is_profiling_memory': i.is_profiling_memory
+            } for i in models.CeleryTaskRepository.objects.filter(enabled=True)}
+        self._white_list = set(models.TaskWhiteList.objects.all().values_list('task__name', flat=True))
+        self._black_list = set(models.TaskBlackList.objects.all().values_list('task__name', flat=True))
 
     def register(self, name: str) -> models.CeleryTaskRepository:
         """ Регистрация задачи """
@@ -222,7 +248,8 @@ class TaskRepository(metaclass=utils.SingletonMeta):
 
     def get_task_record(self, name: str) -> models.CeleryTaskRepository:
         """ Получение записи из репозитория задач """
-        if name not in self.task_repository:
+        self._ensure_initialized()
+        if name not in self._task_repository:
             raise ValueError(f'Задача "{name}" не найдена в репозитории.')
 
         return models.CeleryTaskRepository.objects.get(name=name)

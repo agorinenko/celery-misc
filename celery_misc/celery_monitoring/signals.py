@@ -33,6 +33,7 @@ def signals_connect():
 
 def update_repository_signal(*args, **kwargs):
     """ Обновление глобального репозитория задач """
+    # TODO: Сигналы не обновляют кеш Celery. Следует хранить состояние в Redis
     from celery_misc.celery_monitoring.monitoring_utils import TASK_REPOSITORY
 
     TASK_REPOSITORY.refresh_state()
