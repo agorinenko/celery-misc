@@ -73,8 +73,6 @@ class CeleryTaskInstance(models.Model):
     task_kwargs = models.JSONField(null=True, blank=True, verbose_name='Параметры запуска')
     state = models.JSONField(null=True, blank=True, verbose_name='Состояние выполнения')
     result = models.JSONField(null=True, blank=True, verbose_name='Результат выполнения')
-    profiling_cpu_result = models.TextField(null=True, blank=True, verbose_name='Результат профилирования CPU')
-    profiling_memory_result = models.TextField(null=True, blank=True, verbose_name='Результат профилирования ОЗУ')
 
     task_id = models.UUIDField(unique=True, null=False, blank=False, verbose_name='ID задачи')
     restarted_task_id = models.UUIDField(null=True, blank=True, verbose_name='ID перезапущенной задачи')
@@ -87,6 +85,8 @@ class CeleryTaskInstance(models.Model):
                                    choices=enums.TaskStatuses.choices,
                                    default=enums.TaskStatuses.IN_PROGRESS,
                                    verbose_name='Статус выполнения задачи')
+    profiling_cpu_result = models.JSONField(null=True, blank=True, verbose_name='Результат профилирования CPU')
+    profiling_memory_result = models.JSONField(null=True, blank=True, verbose_name='Результат профилирования ОЗУ')
 
     def calculate_duration(self) -> float:
         """ Продолжительность выполнения задачи """
