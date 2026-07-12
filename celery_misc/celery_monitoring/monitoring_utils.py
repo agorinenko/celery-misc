@@ -130,6 +130,11 @@ class Terminator:
         return False
 
 
+def _normalize_name(name: str):
+    name = name.lower().strip()
+    return name
+
+
 class TaskRepository(metaclass=utils.SingletonMeta):
     """ Репозиторий зарегистрированных задач """
 
@@ -148,6 +153,7 @@ class TaskRepository(metaclass=utils.SingletonMeta):
     def is_profiling_memory(self, name: str) -> bool:
         """ Доступно профилирование ОЗУ """
         self._ensure_initialized()
+        name = _normalize_name(name)
         task = self._task_repository.get(name)
         if not task:
             return False
@@ -157,25 +163,31 @@ class TaskRepository(metaclass=utils.SingletonMeta):
     def is_profiling_cpu(self, name: str) -> bool:
         """ Доступно профилирование CPU """
         self._ensure_initialized()
-
+        name = _normalize_name(name)
         task = self._task_repository.get(name)
         if not task:
             return False
 
         return task.get('is_profiling_cpu', False)
 
-    def is_monitoring(self, name: str) -> bool:
+    def is_monitoring(self, name: str, log_info: bool | None = True) -> bool:
         """ Задание на мониторинге """
         self._ensure_initialized()
+        name = _normalize_name(name)
         # Если репозиторий пуст, то для мониторинга доступны все задачи
         if not self._task_repository:
             return True
+
         # Если задача в черном списке, то она не доступна для мониторинга
         if name in self._black_list:
+            if log_info:
+                logger.info('Задача "%s" находится в черном списке.', name)
             return False
 
         # Если белый список ведется и задача в нем, то она доступна для мониторинга
         if self._white_list and name not in self._white_list:
+            if log_info:
+                logger.info('Открыт белый список и задача "%s" не находится в нем.', name)
             return False
 
         return True
@@ -183,13 +195,15 @@ class TaskRepository(metaclass=utils.SingletonMeta):
     def refresh_state(self):
         """ Обновление состояния глобального репозитория задач """
         self._task_repository = {
-            i.name: {
+            _normalize_name(i.name): {
                 'name': i.name,
                 'is_profiling_cpu': i.is_profiling_cpu,
                 'is_profiling_memory': i.is_profiling_memory
             } for i in models.CeleryTaskRepository.objects.filter(enabled=True)}
-        self._white_list = set(models.TaskWhiteList.objects.all().values_list('task__name', flat=True))
-        self._black_list = set(models.TaskBlackList.objects.all().values_list('task__name', flat=True))
+        self._white_list = {_normalize_name(i.task.name) for i in
+                            models.TaskWhiteList.objects.filter(task__enabled=True)}
+        self._black_list = {_normalize_name(i.task.name) for i in
+                            models.TaskBlackList.objects.filter(task__enabled=True)}
 
     def register(self, name: str) -> models.CeleryTaskRepository:
         """ Регистрация задачи """

@@ -1,5 +1,10 @@
 # History
 
+1.0.10
+==================
+
+1. Celery Monitoring: вывод в лог причину снятия с мониторинга https://github.com/agorinenko/celery-misc/issues/13
+
 1.0.9
 ==================
 
