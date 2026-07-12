@@ -1,4 +1,5 @@
 import logging
+import pprint
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -204,6 +205,14 @@ class TaskRepository(metaclass=utils.SingletonMeta):
                             models.TaskWhiteList.objects.filter(task__enabled=True)}
         self._black_list = {_normalize_name(i.task.name) for i in
                             models.TaskBlackList.objects.filter(task__enabled=True)}
+
+        logger.debug("================ CELERY MONITORING INFO ================\n"
+                     "repository: %s\n"
+                     "white_list: %s\n"
+                     "black_list: %s",
+                     pprint.pformat(self._task_repository),
+                     pprint.pformat(self._white_list),
+                     pprint.pformat(self._black_list))
 
     def register(self, name: str) -> models.CeleryTaskRepository:
         """ Регистрация задачи """
