@@ -53,7 +53,7 @@ def register_task(task_id, task, *args, **kwargs):
 @cleanup_db_connections
 def finish_task(task_id, task, retval, *args, **kwargs):
     """ Регистрация окончания запущенной задачи Celery """
-    if monitoring_utils.TASK_REPOSITORY.is_monitoring(task.name):
+    if monitoring_utils.TASK_REPOSITORY.is_monitoring(task.name, log_info=False):
         task_status = enums.TaskStatuses.DONE
         task_result = {}
         if retval:
