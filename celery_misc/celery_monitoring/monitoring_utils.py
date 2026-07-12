@@ -149,6 +149,9 @@ class TaskRepository(metaclass=utils.SingletonMeta):
         """ Доступно профилирование ОЗУ """
         self._ensure_initialized()
         task = self._task_repository.get(name)
+        if not task:
+            return False
+
         return task.get('is_profiling_memory', False)
 
     def is_profiling_cpu(self, name: str) -> bool:
@@ -156,17 +159,22 @@ class TaskRepository(metaclass=utils.SingletonMeta):
         self._ensure_initialized()
 
         task = self._task_repository.get(name)
+        if not task:
+            return False
+
         return task.get('is_profiling_cpu', False)
 
     def is_monitoring(self, name: str) -> bool:
         """ Задание на мониторинге """
         self._ensure_initialized()
-        if name not in self._task_repository:
+        # Если репозиторий пуст, то для мониторинга доступны все задачи
+        if not self._task_repository:
             return True
-
+        # Если задача в черном списке, то она не доступна для мониторинга
         if name in self._black_list:
             return False
 
+        # Если белый список ведется и задача в нем, то она доступна для мониторинга
         if self._white_list and name not in self._white_list:
             return False
 
@@ -188,6 +196,7 @@ class TaskRepository(metaclass=utils.SingletonMeta):
         task, created = _get_or_create(models.CeleryTaskRepository, name=name)
         if created:
             self.refresh_state()
+
         return task
 
     def add_to_white_list(self, name: str) -> models.TaskWhiteList:
@@ -196,6 +205,7 @@ class TaskRepository(metaclass=utils.SingletonMeta):
         obj, created_2 = _get_or_create(models.TaskWhiteList, task=task)
         if created_1 or created_2:
             self.refresh_state()
+
         return obj
 
     def remove_from_white_list(self, name: str) -> bool:
