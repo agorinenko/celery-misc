@@ -1,5 +1,10 @@
 # History
 
+1.0.12
+==================
+
+1. Celery Monitoring: Реализация общего кеша задач в Redis https://github.com/agorinenko/celery-misc/issues/11
+
 1.0.11
 ==================
 
