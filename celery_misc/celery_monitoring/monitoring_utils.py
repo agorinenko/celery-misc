@@ -10,11 +10,13 @@ from django.db.models.signals import post_delete
 from django.utils import timezone
 from kombu.utils import symbol_by_name
 
-from celery_misc.celery_monitoring import models, enums
-from celery_misc import model_utils, utils, signal_utils
+from celery_misc.celery_monitoring import models, enums, settings
+from celery_misc import model_utils, utils, signal_utils, cache_utils
 from celery_misc.celery_monitoring.signals import update_repository_signal
 
 logger = logging.getLogger(__name__)
+
+TASK_REPOSITORY_CACHE = cache_utils.DjangoCache(expired_timeout=settings.TASK_REPOSITORY_CACHE_IN_SEC)
 
 
 def update_task_properties(task_obj: str | uuid.UUID | models.CeleryTaskInstance | Task, properties: dict[str, Any]):
@@ -143,13 +145,16 @@ class TaskRepository(metaclass=utils.SingletonMeta):
         self._task_repository = {}
         self._white_list = set()
         self._black_list = set()
-        self._is_initialized = False
 
     def _ensure_initialized(self):
-        """Ленивая инициализация репозитория"""
-        if not self._is_initialized:
-            self.refresh_state()
-            self._is_initialized = True
+        """ Ленивая инициализация репозитория """
+        repository_state = TASK_REPOSITORY_CACHE.get_value(settings.TASK_REPOSITORY_CACHE_KEY)
+        if not repository_state:
+            repository_state = self.refresh_state()
+
+        self._task_repository = repository_state['task_repository']
+        self._white_list = repository_state['white_list']
+        self._black_list = repository_state['black_list']
 
     def is_profiling_memory(self, name: str) -> bool:
         """ Доступно профилирование ОЗУ """
@@ -193,26 +198,28 @@ class TaskRepository(metaclass=utils.SingletonMeta):
 
         return True
 
-    def refresh_state(self):
+    def refresh_state(self) -> dict:
         """ Обновление состояния глобального репозитория задач """
-        self._task_repository = {
+        task_repository = {
             _normalize_name(i.name): {
                 'name': i.name,
                 'is_profiling_cpu': i.is_profiling_cpu,
                 'is_profiling_memory': i.is_profiling_memory
             } for i in models.CeleryTaskRepository.objects.filter(enabled=True)}
-        self._white_list = {_normalize_name(i.task.name) for i in
-                            models.TaskWhiteList.objects.filter(task__enabled=True)}
-        self._black_list = {_normalize_name(i.task.name) for i in
-                            models.TaskBlackList.objects.filter(task__enabled=True)}
+        white_list = {_normalize_name(i.task.name) for i in
+                      models.TaskWhiteList.objects.filter(task__enabled=True)}
+        black_list = {_normalize_name(i.task.name) for i in
+                      models.TaskBlackList.objects.filter(task__enabled=True)}
 
-        logger.debug("================ CELERY MONITORING INFO ================\n"
-                     "repository: %s\n"
-                     "white_list: %s\n"
-                     "black_list: %s",
-                     pprint.pformat(self._task_repository),
-                     pprint.pformat(self._white_list),
-                     pprint.pformat(self._black_list))
+        repository_state = {
+            'task_repository': task_repository,
+            'white_list': white_list,
+            'black_list': black_list,
+        }
+        logger.debug('================ CELERY MONITORING STATE ================\n%s', pprint.pformat(repository_state))
+        TASK_REPOSITORY_CACHE.set_value(settings.TASK_REPOSITORY_CACHE_KEY, repository_state)
+
+        return repository_state
 
     def register(self, name: str) -> models.CeleryTaskRepository:
         """ Регистрация задачи """
