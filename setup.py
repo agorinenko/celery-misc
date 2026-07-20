@@ -18,7 +18,7 @@ def long_description():
 
 setuptools.setup(
     name='celery-misc',
-    version='1.0.12',
+    version='1.0.13',
     author='Anton Gorinenko',
     author_email='anton.gorinenko@gmail.com',
     description='Python async tools for Celery',
@@ -36,7 +36,8 @@ setuptools.setup(
     ],
     install_requires=[
         'celery',
-        'uuid6'
+        'uuid6',
+        'psutil'
     ],
     extras_require={
         'django': [
