@@ -36,7 +36,7 @@ class BaseSendEventsStrategy(abc.ABC):
         """ Дополнительная обработка запроса """
         return query_set
 
-    def send_events(self, event_ids: list[int] = None, external_filter: Q | None = None) -> list[int]:
+    def send_events(self, event_ids: list[int]|None = None, external_filter: Q | None = None) -> list[int]:
         """
         Отправка уведомлений во внешнюю систему, например в kafka или rabbit
         :param external_filter: дополнительный фильтр
