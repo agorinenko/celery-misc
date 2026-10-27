@@ -51,14 +51,26 @@ def _send_events(_, event_ids: list[int] | None = None, suppress_events_error: b
     class_strategies = list(
         strategies.get_pending_outbox_messages(event_ids=event_ids).values_list('strategy', flat=True).distinct(
             'strategy'))
+
+    allowed_strategies = settings.SEND_EVENTS_ALLOWED_STRATEGIES
+
     for class_strategy in class_strategies:
         if class_strategy is None:
             external_filter = Q(strategy__isnull=True)
             class_strategy = settings.SEND_EVENTS_STRATEGY
         else:
             external_filter = Q(strategy=class_strategy)
+
+        if allowed_strategies and class_strategy not in allowed_strategies:
+            # Стратегия не в whitelist: не загружаем и не исполняем её код,
+            # а помечаем сообщения как проваленные с видимой ошибкой
+            error_text = f'Стратегия "{class_strategy}" не разрешена к загрузке.'
+            logger.error(error_text)
+            _mark_strategy_messages_failed(external_filter, event_ids, error_text)
+            continue
+
         try:
-            StrategyClass = utils.load_class(class_strategy)
+            StrategyClass = utils.load_class(class_strategy, base_class=strategies.BaseSendEventsStrategy)
 
             strategy = StrategyClass(batch_size=batch_size)
             error_messages = strategy.send_events(event_ids=event_ids, external_filter=external_filter)
@@ -69,6 +81,17 @@ def _send_events(_, event_ids: list[int] | None = None, suppress_events_error: b
         except Exception as ex:
             logger.error('Возникла ошибка при обработке стратегии "%s".', class_strategy)
             logger.exception(ex)
+            # Ошибка загрузки/создания стратегии не должна быть «тихой»:
+            # сообщения помечаются FAILED, чтобы проблема была видна в админке
+            _mark_strategy_messages_failed(external_filter, event_ids, str(ex))
+
+
+def _mark_strategy_messages_failed(external_filter: Q, event_ids: list[int] | None, error_text: str) -> None:
+    """ Помечает сообщения стратегии как проваленные из-за недоступности самой стратегии """
+    messages_qs = strategies.get_pending_outbox_messages(event_ids=event_ids).filter(external_filter)
+    marked = messages_qs.update(status=enums.EventStatuses.FAILED, error=error_text, updated_at=timezone.now())
+    if marked:
+        logger.error('Помечено сообщений как FAILED из-за недоступной стратегии: %s.', marked)
 
 
 def _expiring_events(_, expiration_delta_in_hours: int  = 12):

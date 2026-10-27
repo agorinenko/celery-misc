@@ -41,7 +41,7 @@ CELERY_BEAT_SCHEDULE = {
 
 | Задача | Что делает | Параметры вызова | Настройки |
 |---|---|---|---|
-| ``send_events`` | Периодически отсылает ещё не отправленные сообщения (страховка; основной путь — немедленная отправка) | ``event_ids`` — отправить только указанные сообщения; ``suppress_events_error`` — не падать при ошибках отправки; ``batch_size`` — размер порции (по умолчанию 50) | ``SEND_EVENTS_STRATEGY`` — стратегия по умолчанию |
+| ``send_events`` | Периодически отсылает ещё не отправленные сообщения (страховка; основной путь — немедленная отправка) | ``event_ids`` — отправить только указанные сообщения; ``suppress_events_error`` — не падать при ошибках отправки; ``batch_size`` — размер порции (по умолчанию 50) | ``SEND_EVENTS_STRATEGY`` — стратегия по умолчанию; ``SEND_EVENTS_ALLOWED_STRATEGIES`` — whitelist разрешённых стратегий (не попавшие в него помечаются ``failed``) |
 | ``send_events_only_ones`` | Отправляет созданные события сразу после их регистрации (диспатчится автоматически после коммита транзакции) | ``event_ids`` — обязательный список сообщений | ``SEND_EVENTS_MAX_RETRIES`` (5), ``SEND_EVENTS_RETRY_BACKOFF`` (3), ``SEND_EVENTS_RETRY_BACKOFF_MAX`` (600), ``SEND_EVENTS_RETRY_JITTER`` (True) — политика ретраев при ошибках отправки |
 | ``expiring_events`` | Помечает сообщения, не отправленные за определённый период (по умолчанию 12 часов), как устаревшие | ``expiration_delta_in_hours`` (по умолчанию 12) | — |
 | ``delete_events`` | Удаляет сообщения, созданные ранее определённой даты (по умолчанию старше 24 часов) | ``expiration_delta_in_hours`` (по умолчанию 24) | — |
@@ -73,12 +73,19 @@ CELERY_MISC_TRANSACTIONAL_OUTBOX = {
     'SEND_EVENTS_RETRY_BACKOFF_MAX': 800,
     'SEND_EVENTS_RETRY_JITTER': True,
     'SEND_EVENTS_STRATEGY': 'celery_misc.transactional_outbox.strategies.DummyCheckStatusStrategy',
+    'SEND_EVENTS_ALLOWED_STRATEGIES': [
+        'celery_misc.transactional_outbox.strategies.DummyCheckStatusStrategy',
+    ],
     'REQUEUE_STALE_EVENTS_MINUTES': 10,
 }
 ```
 
 ``SEND_EVENTS_STRATEGY`` отвечает за стратегию отправки и реализацию самой отправки. Наследуйтесь от BlockBatchStrategy
 или CheckStatusStrategy и реализуйте механизм отправки сообщений во внешнюю систему.
+
+``SEND_EVENTS_ALLOWED_STRATEGIES`` — whitelist стратегий, которые разрешено загружать по FQCN. Стратегия, не входящая
+в список, не импортируется и не исполняется: её сообщения помечаются статусом ``failed`` с текстом ошибки. Пустой
+список означает отсутствие ограничений (совместимость с прежним поведением).
 
 ``REQUEUE_STALE_EVENTS_MINUTES`` задаёт порог, после которого сообщение, застрявшее в статусе ``sending``, считается
 «зависшим» и возвращается задачей ``requeue_stale_events`` в ``pending``. Значение должно быть заведомо больше
