@@ -36,7 +36,7 @@ class BaseSendEventsStrategy(abc.ABC):
         """ Дополнительная обработка запроса """
         return query_set
 
-    def send_events(self, event_ids: list[int] = None, external_filter: Q | None = None) -> list[int]:
+    def send_events(self, event_ids: list[int]|None = None, external_filter: Q | None = None) -> list[int]:
         """
         Отправка уведомлений во внешнюю систему, например в kafka или rabbit
         :param external_filter: дополнительный фильтр
@@ -118,23 +118,48 @@ class BlockBatchStrategy(BaseSendEventsStrategy, abc.ABC):
 
 class CheckStatusStrategy(BaseSendEventsStrategy, abc.ABC):
     """
-    Стратегия отказа от одной долгой транзакции.
-    В этом случае возможны ситуации, когда сообщения уже были отправлены.
-    Поэтому перед отправкой требуется блокировка записи с проверкой статуса. Batch_size можно увеличить,
-    так как нет одной длительной транзакции. При этом подходе записи OutboxMessage будут сразу доступны после их обработки.
+    Стратегия без долгих блокировок: сообщение захватывается атомарным
+    условным UPDATE (PENDING/FAILED -> SENDING), публикация выполняется вне
+    транзакции, финальный статус (SENT/FAILED) пишется отдельным коротким UPDATE.
+
+    Защита от двойной отправки обеспечивается условием захвата: перевести строку
+    в SENDING может только один воркер (rowcount == 1). «Зависшие» в SENDING
+    сообщения (падение воркера между захватом и финализацией) возвращает в PENDING
+    периодическая задача requeue_stale_events.
     """
 
     def process_one_message(self, message: models.OutboxMessage) -> bool:
-        """ Блокировка на уровне одной записи """
-        with transaction.atomic():
-            # Блокируем ТОЛЬКО это конкретное сообщение
-            locked_message = models.OutboxMessage.objects.select_for_update().get(id=message.id)
+        """ Атомарный захват сообщения без долгой блокировки """
+        claimed = (
+            models.OutboxMessage.objects
+            .filter(id=message.id, status__in=[enums.EventStatuses.PENDING, enums.EventStatuses.FAILED])
+            .update(status=enums.EventStatuses.SENDING, updated_at=timezone.now())
+        )
+        if not claimed:
+            # Сообщение уже отправлено или захвачено другим воркером
+            return True
 
-            # Проверяем, что сообщение все еще нужно отправить
-            if locked_message.status == enums.EventStatuses.SENT:
-                return True
+        try:
+            # Внешний вызов — строка больше не заблокирована
+            self.publish_message(message)
 
-            return super().process_one_message(locked_message)
+            models.OutboxMessage.objects.filter(id=message.id).update(
+                status=enums.EventStatuses.SENT,
+                sent_at=timezone.now(),
+                updated_at=timezone.now(),
+                error=None
+            )
+            return True
+        except Exception as ex:
+            models.OutboxMessage.objects.filter(id=message.id).update(
+                status=enums.EventStatuses.FAILED,
+                error=str(ex),
+                updated_at=timezone.now()
+            )
+
+            logger.error('Произошла ошибка при отправки сообщения во внешнюю систему. ID#%s', message.id)
+            logger.exception(ex)
+            return False
 
 
 class DummyBlockBatchStrategy(BlockBatchStrategy):

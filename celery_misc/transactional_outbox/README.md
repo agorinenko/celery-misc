@@ -30,16 +30,22 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'celery_misc.transactional_outbox.tasks.delete_events',
         'schedule': crontab(minute='*/20'),  # every 20 min
     },
+    'Возврат зависших сообщений в очередь': {
+        'task': 'celery_misc.transactional_outbox.tasks.requeue_stale_events',
+        'schedule': crontab(minute='*/5'),  # every 5 min
+    },
 }
 ```
 
-``send_events`` - отсылает еще не отправленные сообщения
+### Задачи и их настройки
 
-``expiring_events`` - помечает сообщения, которые не были отправлены за определенный период времени(по умолчанию 12
-часов) как устаревшие
-
-``delete_events`` - удаляет сообщения, которые были созданы позднее определенной даты(по умолчанию текущая дата минус 24
-часа)
+| Задача | Что делает | Параметры вызова | Настройки |
+|---|---|---|---|
+| ``send_events`` | Периодически отсылает ещё не отправленные сообщения (страховка; основной путь — немедленная отправка) | ``event_ids`` — отправить только указанные сообщения; ``suppress_events_error`` — не падать при ошибках отправки; ``batch_size`` — размер порции (по умолчанию 50) | ``SEND_EVENTS_STRATEGY`` — стратегия по умолчанию; ``SEND_EVENTS_ALLOWED_STRATEGIES`` — whitelist разрешённых стратегий (не попавшие в него помечаются ``failed``) |
+| ``send_events_only_ones`` | Отправляет созданные события сразу после их регистрации (диспатчится автоматически после коммита транзакции) | ``event_ids`` — обязательный список сообщений | ``SEND_EVENTS_MAX_RETRIES`` (5), ``SEND_EVENTS_RETRY_BACKOFF`` (3), ``SEND_EVENTS_RETRY_BACKOFF_MAX`` (600), ``SEND_EVENTS_RETRY_JITTER`` (True) — политика ретраев при ошибках отправки |
+| ``expiring_events`` | Помечает сообщения, не отправленные за определённый период (по умолчанию 12 часов), как устаревшие | ``expiration_delta_in_hours`` (по умолчанию 12) | — |
+| ``delete_events`` | Удаляет сообщения, созданные ранее определённой даты (по умолчанию старше 24 часов) | ``expiration_delta_in_hours`` (по умолчанию 24) | — |
+| ``requeue_stale_events`` | Возвращает сообщения, «зависшие» в статусе ``sending`` дольше допустимого времени (падение воркера между захватом и отправкой), обратно в ``pending`` | ``stale_delta_minutes`` (по умолчанию берётся из настройки) | ``REQUEUE_STALE_EVENTS_MINUTES`` (по умолчанию 10) — порог «зависания»; должен быть больше максимальной длительности публикации |
 
 3. Добавьте нужные модули в настройках Django. django_json_widget нужен для красивого отображение json полей в Django
    AdminUI.
@@ -66,12 +72,24 @@ CELERY_MISC_TRANSACTIONAL_OUTBOX = {
     'SEND_EVENTS_RETRY_BACKOFF': 4,
     'SEND_EVENTS_RETRY_BACKOFF_MAX': 800,
     'SEND_EVENTS_RETRY_JITTER': True,
-    'SEND_EVENTS_STRATEGY': 'celery_misc.transactional_outbox.strategies.DummyCheckStatusStrategy'
+    'SEND_EVENTS_STRATEGY': 'celery_misc.transactional_outbox.strategies.DummyCheckStatusStrategy',
+    'SEND_EVENTS_ALLOWED_STRATEGIES': [
+        'celery_misc.transactional_outbox.strategies.DummyCheckStatusStrategy',
+    ],
+    'REQUEUE_STALE_EVENTS_MINUTES': 10,
 }
 ```
 
 ``SEND_EVENTS_STRATEGY`` отвечает за стратегию отправки и реализацию самой отправки. Наследуйтесь от BlockBatchStrategy
 или CheckStatusStrategy и реализуйте механизм отправки сообщений во внешнюю систему.
+
+``SEND_EVENTS_ALLOWED_STRATEGIES`` — whitelist стратегий, которые разрешено загружать по FQCN. Стратегия, не входящая
+в список, не импортируется и не исполняется: её сообщения помечаются статусом ``failed`` с текстом ошибки. Пустой
+список означает отсутствие ограничений (совместимость с прежним поведением).
+
+``REQUEUE_STALE_EVENTS_MINUTES`` задаёт порог, после которого сообщение, застрявшее в статусе ``sending``, считается
+«зависшим» и возвращается задачей ``requeue_stale_events`` в ``pending``. Значение должно быть заведомо больше
+максимальной длительности публикации (внешнего вызова).
 
 6. Вы прекрасны! Реализовывайте бизнес логику вашего приложения, не вдаваясь в детали Transactional Outbox.
 
@@ -149,10 +167,11 @@ with outbox_utils.OutboxEvent(event_type, strategy=strategy) as outbox_guard:
 статус сообщений и открывать отдельные транзакции, так как создается одна длительная транзакция. Batch_size желательно
 уменьшить, чтобы сократить время общей блокировки.
 
-**CheckStatusStrategy**. Стратегия отказа от одной долгой транзакции. В этом случае возможны ситуации, когда сообщения
-уже были отправлены. Поэтому перед отправкой требуется блокировка записи с проверкой статуса. Batch_size можно
-увеличить, так как нет одной длительной транзакции. При этом подходе записи OutboxMessage будут сразу доступны после их
-обработки.
+**CheckStatusStrategy**. Стратегия без долгих блокировок: сообщение захватывается атомарным условным UPDATE
+(`pending`/`failed` → `sending`), публикация выполняется **вне** транзакции, а финальный статус (`sent`/`failed`)
+пишется отдельным коротким UPDATE. Двойная отправка исключается условием захвата: перевести строку в `sending` может
+только один воркер (`rowcount == 1`). Сообщения, «зависшие» в `sending` из-за падения воркера между захватом и
+финализацией, возвращает в `pending` периодическая задача ``requeue_stale_events``.
 
 Наследуйтесь от BlockBatchStrategy или CheckStatusStrategy и реализуйте механизм отправки сообщений во внешнюю систему
 путем переопределения метода publish_message. Например,

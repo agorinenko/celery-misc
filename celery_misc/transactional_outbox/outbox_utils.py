@@ -44,6 +44,11 @@ class OutboxEvent:
 
             if self._transaction:
                 self._transaction.__exit__(exc_type, exc_val, exc_tb)
+
+            # Выполнение задачи отправки только после успешного коммита:
+            # иначе воркер может выполнить задачу раньше фиксации записи и не увидеть её
+            if exc_type is None and self.event_ids:
+                tasks.send_events_only_ones.apply_async(kwargs={'event_ids': self.event_ids})
         except Exception as e:
             if self._transaction:
                 self._transaction.__exit__(type(e), e, e.__traceback__)
@@ -113,9 +118,6 @@ class OutboxEvent:
             objs = [models.OutboxMessage(**payload) for payload in self.payload]
             db_objs = models.OutboxMessage.objects.bulk_create(objs)
             self.event_ids = [msg.id for msg in db_objs]
-
-        if self.event_ids:
-            tasks.send_events_only_ones.apply_async(kwargs={'event_ids': self.event_ids})
 
     def _serialize_event(self, event_payload: dict) -> dict:
         aggregate_type = str(type(self.instance).__name__)
