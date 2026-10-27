@@ -26,6 +26,7 @@ class OutboxMessage(models.Model):
                               verbose_name='Статус отправки')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
     sent_at = models.DateTimeField(null=True, blank=True, verbose_name='Дата отправки')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='Дата изменения')
 
     error = models.TextField(null=True, blank=True, verbose_name='Ошибка отправки')
 

@@ -39,7 +39,13 @@ def delete_events(self, *args, **kwargs):
     return celery_utils.safety_celery_task(self, _delete_events, *args, **kwargs)
 
 
-def _send_events(_, event_ids: list[int] = None, suppress_events_error: bool | None = False,
+@shared_task(bind=True)
+def requeue_stale_events(self, *args, **kwargs):
+    """ Возврат «зависших» в статусе SENDING сообщений в PENDING """
+    return celery_utils.safety_celery_task(self, _requeue_stale_events, *args, **kwargs)
+
+
+def _send_events(_, event_ids: list[int] | None = None, suppress_events_error: bool | None = False,
                  batch_size: int | None = 50):
     """ Отправка уведомлений во внешнюю систему, например в kafka или rabbit """
     class_strategies = list(
@@ -65,7 +71,7 @@ def _send_events(_, event_ids: list[int] = None, suppress_events_error: bool | N
             logger.exception(ex)
 
 
-def _expiring_events(_, expiration_delta_in_hours: int | None = 12):
+def _expiring_events(_, expiration_delta_in_hours: int  = 12):
     expiration_filter = ~Q(Q(status=enums.EventStatuses.SENT) | Q(status=enums.EventStatuses.EXPIRED))
     if expiration_delta_in_hours > 0:
         expiration_date = timezone.now() - timedelta(hours=expiration_delta_in_hours)
@@ -79,7 +85,7 @@ def _expiring_events(_, expiration_delta_in_hours: int | None = 12):
     model_utils.batch_processing(queryset, expiration_filter, __expiring_queryset)
 
 
-def _delete_events(_, expiration_delta_in_hours: int | None = 24):
+def _delete_events(_, expiration_delta_in_hours: int = 24):
     delete_filter = Q()
     if expiration_delta_in_hours > 0:
         expiration_date = timezone.now() - timedelta(hours=expiration_delta_in_hours)
@@ -87,3 +93,16 @@ def _delete_events(_, expiration_delta_in_hours: int | None = 24):
 
     queryset = models.OutboxMessage.objects.filter(delete_filter)
     model_utils.batch_delete(queryset, delete_filter)
+
+
+def _requeue_stale_events(_, stale_delta_minutes: int | None = None):
+    """ Возвращает в PENDING сообщения, зависшие в SENDING дольше допустимого времени.
+    Нужно для восстановления после падения воркера между атомарным захватом
+    сообщения и финализацией статуса.
+    """
+    delta_minutes = stale_delta_minutes or settings.REQUEUE_STALE_EVENTS_MINUTES
+    stale_date = timezone.now() - timedelta(minutes=delta_minutes)
+
+    models.OutboxMessage.objects.filter(
+        status=enums.EventStatuses.SENDING, updated_at__lt=stale_date
+    ).update(status=enums.EventStatuses.PENDING, updated_at=timezone.now())
