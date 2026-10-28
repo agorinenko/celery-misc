@@ -4,6 +4,7 @@ from functools import wraps, partial
 from typing import Callable
 
 from celery import Task
+from celery.utils.time import get_exponential_backoff_interval
 
 try:
     from django import db
@@ -65,7 +66,11 @@ def check_connections():
 def common_celery_task(
         *args, retry_if_error: bool | None = True,
         suppress_error: bool | None = False,
-        before_send: Callable | None = None, **kwargs):
+        before_send: Callable | None = None,
+        retry_backoff: int = 2,
+        retry_backoff_max: int = 600,
+        retry_jitter: bool = True,
+        **kwargs):
     task = None
     if len(args) < 1:
         raise ValueError('Неверное использование common_celery_task. Не указана функция для выполнения.')
@@ -101,7 +106,11 @@ def common_celery_task(
         logger.error(f'Возникла ошибка при выполнении задачи %s.', task_name)
         logger.exception(ex)
         if retry_if_error and task and hasattr(task, 'retry'):
-            raise task.retry(exc=ex)
+            countdown = get_exponential_backoff_interval(
+                factor=retry_backoff, retries=task.request.retries,
+                maximum=retry_backoff_max, full_jitter=retry_jitter,
+            )
+            raise task.retry(exc=ex, countdown=countdown)
 
         if not suppress_error:
             raise ex
