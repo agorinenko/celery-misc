@@ -1,11 +1,17 @@
 # History
 
+1.0.15
+==================
+
+1. Celery utils: добавлен Exponential Backoff и Jitter у common_celery_task
+
 1.0.14
 ==================
 
 1. Transactional outbox: исправлена гонка коммита, когда задача Celery «отправить события» ставится в очередь до того,
    как транзакция, создавшая outbox-запись, закоммитилась.
-2. Transactional outbox: реализован атомарный захват без долгой блокировки транзакции в базовой стратегии CheckStatusStrategy
+2. Transactional outbox: реализован атомарный захват без долгой блокировки транзакции в базовой стратегии
+   CheckStatusStrategy
 
 1.0.13
 ==================
