@@ -35,16 +35,41 @@ def cleanup_db_connections(func):
         try:
             return func(*args, **kwargs)
         except (db.OperationalError, db.InterfaceError) as exc:
-            logger.exception(exc)
+            logger.warning('Повтор операции на ошибку: %s', str(exc))
             db.close_old_connections()
+            check_connections()
             try:
                 return func(*args, **kwargs)
-            except (db.OperationalError, db.InterfaceError):
+            except (db.OperationalError, db.InterfaceError) as exc2:
+                logger.exception(exc2)
                 raise
         finally:
             db.close_old_connections()
 
     return wrapper
+
+
+def _check_connection_pool(conn):
+    """
+    Проверка свободных соединений пула psycopg_pool (Django >= 5.1).
+
+    Пул проверяет все свободные соединения, битые выбрасывает и создаёт вместо них новые.
+    Для соединений без пула и для psycopg_pool без метода check - ничего не делает.
+    """
+    try:
+        pool = getattr(conn, 'pool', None)
+        check = getattr(pool, 'check', None)
+        if not callable(check):
+            return
+        check()
+    except Exception:  # pylint: disable=broad-except
+        logger.warning('Не удалось проверить пул соединений БД "%s".',
+                       getattr(conn, 'alias', ''), exc_info=True)
+
+
+def _is_db_error(exc) -> bool:
+    """ Ошибка соединения с БД, которую обрабатывает cleanup_db_connections """
+    return WITH_DJANGO and isinstance(exc, (db.OperationalError, db.InterfaceError))
 
 
 def check_connections():
@@ -56,10 +81,12 @@ def check_connections():
 
     for conn in db.connections.all():
         try:
-            cur = conn.cursor()
-            _ = cur.execute('SELECT 1')
-        except (db.OperationalError, db.InterfaceError):
+            with conn.cursor() as cur:
+                cur.execute('SELECT 1')
+        except (db.OperationalError, db.InterfaceError) as exc:
+            logger.warning('Соединение с БД "%s" неработоспособно и будет закрыто: %s', conn.alias, exc)
             conn.close()
+            _check_connection_pool(conn)
 
 
 @cleanup_db_connections
@@ -103,8 +130,11 @@ def common_celery_task(
         if message:
             logger.info(message)
     except Exception as ex:  # pylint: disable=broad-except
-        logger.error(f'Возникла ошибка при выполнении задачи %s.', task_name)
-        logger.exception(ex)
+        if _is_db_error(ex):
+            # Итог с учётом повтора логирует cleanup_db_connections
+            logger.warning('Ошибка БД при выполнении задачи %s: %s', task_name, str(ex))
+        else:
+            logger.exception('Возникла ошибка при выполнении задачи %s.', task_name)
         if retry_if_error and task and hasattr(task, 'retry'):
             countdown = get_exponential_backoff_interval(
                 factor=retry_backoff, retries=task.request.retries,
